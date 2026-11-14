@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { scroll-behavior: smooth; }
+body { @apply bg-slate-50 text-slate-800 antialiased; }
+:focus-visible { outline: 2px solid #10b981; outline-offset: 2px; }
+
+.hero-bg {
+  background-color: #0b1220;
+  background-image:
+    radial-gradient(60rem 30rem at 85% -10%, rgba(16,185,129,.28), transparent 60%),
+    radial-gradient(40rem 25rem at -10% 110%, rgba(56,189,248,.18), transparent 60%),
+    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: auto, auto, 36px 36px, 36px 36px;
+}
+
+/* Notebook page for guides */
+.notebook {
+  background-color: #fffef8;
+  background-image: repeating-linear-gradient(
+    to bottom, transparent 0, transparent calc(1.8rem - 1px), #d6e6f5 calc(1.8rem - 1px), #d6e6f5 1.8rem
+  );
+  background-position: 0 0.35rem;
+  line-height: 1.8rem;
+  padding: 1.8rem 1.25rem 1.8rem 1.25rem;
+}
+@media (min-width: 640px) {
+  .notebook {
+    padding: 1.8rem 2rem 1.8rem 5rem;
+    background-image:
+      linear-gradient(to right, transparent 3.6rem, #f2aaaa 3.6rem, #f2aaaa calc(3.6rem + 2px), transparent calc(3.6rem + 2px)),
+      repeating-linear-gradient(to bottom, transparent 0, transparent calc(1.8rem - 1px), #d6e6f5 calc(1.8rem - 1px), #d6e6f5 1.8rem);
+  }
+}
+.notebook h1 { font-size: 2rem; line-height: 2.7rem; margin: 0 0 1.8rem; font-weight: 800; color: #0b1220; }
+.notebook h2 { font-size: 1.4rem; line-height: 1.8rem; margin: 3.6rem 0 1.8rem; font-weight: 700; color: #0b1220; scroll-margin-top: 6rem; }
+.notebook p { margin: 0 0 1.8rem; }
+.notebook ul { margin: 0 0 1.8rem; padding-left: 1.4rem; list-style: disc; }
+.notebook li { margin: 0; }
+.notebook a { color: #047857; text-decoration: underline; text-underline-offset: 3px; }
+.notebook .hand { font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive; }
