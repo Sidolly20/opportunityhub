@@ -1,1 +1,122 @@
+import { createHash } from "crypto";
+import slugify from "slugify";
+import type { Opportunity } from "../types";
 
+/**
+ * Remotive: a free public job board with remote roles and no API key.
+ * We keep only roles whose location field says they accept applicants from
+ * Africa, Nigeria, or anywhere/worldwide. Summaries are written from the
+ * structured fields, never copied from the employer's text.
+ */
+
+const ENDPOINT = "https://remotive.com/api/remote-jobs?limit=200";
+const MAX_JOBS_PER_RUN = 15;
+const OPEN_TO_AFRICA = ["africa", "nigeria", "worldwide", "anywhere", "global"];
+
+interface RemotiveJob {
+  id: number;
+  url: string;
+  title: string;
+  company_name: string;
+  job_type?: string;
+  publication_date?: string;
+  candidate_required_location?: string;
+  salary?: string;
+}
+
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
+
+function isOpenToAfrica(location: string) {
+  const l = location.toLowerCase();
+  return OPEN_TO_AFRICA.some((hint) => l.includes(hint));
+}
+
+// Piecework, labelling and pay-to-start roles. These are skipped even if they pay.
+const REJECT_WORDS = [
+  "annotat", "data label", "labelling", "labeling", "ai trainer", "ai training", "rlhf",
+  "micro task", "microtask", "micro-task", "per task", "per hour task", "tasks per",
+  "onboarding fee", "registration fee", "training fee", "pay to", "deposit", "investment",
+  "commission only", "mlm", "earn from home", "easy money",
+];
+
+function looksLikeScam(text: string) {
+  const t = text.toLowerCase();
+  return REJECT_WORDS.some((w) => t.includes(w));
+}
+
+/**
+ * Reads the first pay figure from a salary string and returns an annual USD-style estimate.
+ * Returns null if no usable figure is stated, so unpaid or unclear roles are skipped.
+ */
+function annualPay(salary: string | undefined): number | null {
+  if (!salary) return null;
+  const t = salary.toLowerCase().replace(/,/g, "");
+  const m = t.match(/(\d+(?:\.\d+)?)\s*(k)?/);
+  if (!m) return null;
+  let n = parseFloat(m[1]);
+  if (m[2] === "k") n *= 1000;
+  if (t.includes("hour")) return n * 2000;
+  if (t.includes("month")) return n * 12;
+  return n;
+}
+
+const MIN_ANNUAL_PAY = 30000; // roles below this are skipped
+
+export async function fetchRemotiveJobs(known: Set<string>): Promise<Opportunity[]> {
+  let body: { jobs?: RemotiveJob[] };
+  try {
+    const res = await fetch(ENDPOINT, {
+      headers: { "User-Agent": "OpportunityHubBot/1.0" },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      console.warn(`[remotive] HTTP ${res.status}, skipping job source`);
+      return [];
+    }
+    body = await res.json();
+  } catch (err) {
+    console.warn("[remotive] fetch failed, skipping job source:", err instanceof Error ? err.message : err);
+    return [];
+  }
+
+  const out: Opportunity[] = [];
+  for (const job of body.jobs ?? []) {
+    if (out.length >= MAX_JOBS_PER_RUN) break;
+    const location = (job.candidate_required_location || "").trim();
+    if (!job.title || !job.url || !job.company_name || !location || !isOpenToAfrica(location)) continue;
+
+    const pay = annualPay(job.salary);
+    if (pay === null || pay < MIN_ANNUAL_PAY) continue; // no stated pay, or too low
+    if (looksLikeScam(`${job.title} ${job.company_name} ${job.salary ?? ""}`)) continue;
+
+    const id = createHash("sha256").update(`remotive|${job.id}`).digest("hex").slice(0, 24);
+    if (known.has(id)) continue;
+
+    const roleType = (job.job_type || "role type not stated").replace(/_/g, " ");
+    const summary = clip(
+      `${job.company_name} is hiring for ${job.title}. The listing is open to applicants in ${location}. ` +
+        `Role type: ${roleType}. Read the full description and apply on the employer's listing.`,
+      400
+    );
+
+    out.push({
+      id,
+      slug: `${slugify(job.title, { lower: true, strict: true }).slice(0, 70)}-${id.slice(0, 6)}`,
+      title: clip(`${job.title} at ${job.company_name}`, 150),
+      category: "Remote Jobs",
+      deadline: null,
+      eligibility: [clip(location, 80)],
+      location: clip(location, 80),
+      summary,
+      keyTakeaways: [
+        `Role type: ${roleType}`,
+        "Confirm the location rules on the official listing before you apply",
+      ],
+      sourceName: "Remotive",
+      sourceUrl: job.url,
+      publishedAt: job.publication_date ? new Date(job.publication_date).toISOString() : new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+  }
+  return out;
+}
