@@ -10,8 +10,6 @@ import { getActive } from "@/lib/data";
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  <meta name="google-site-verification" content="ubILvCdiyRNkx7JySH30ud7IQtSTNsd1LVZCb4QxhFc" />
-},
   metadataBase: new URL(SITE.url),
   title: { default: `${SITE.name} | ${SITE.tagline}`, template: `%s | ${SITE.name}` },
   description: SITE.description,
@@ -27,7 +25,9 @@ export const metadata: Metadata = {
   },
   twitter: { card: "summary_large_image", title: SITE.name, description: SITE.description },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 } },
-  verification: process.env.GOOGLE_SITE_VERIFICATION ? { google: process.env.GOOGLE_SITE_VERIFICATION } : undefined,
+  verification: {
+    google: process.env.GOOGLE_SITE_VERIFICATION || "ubILvCdiyRNkx7JySH30ud7IQtSTNsd1LVZCb4QxhFc",
+  },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0b1220" };
