@@ -81,7 +81,7 @@ export default function DirectoryFilter({
             aria-pressed={closingSoon}
             className={chip(closingSoon)}
           >
-            ⏳ Closing soon
+            Closing soon
           </button>
         </div>
 
