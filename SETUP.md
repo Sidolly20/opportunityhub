@@ -44,3 +44,4 @@ Then add the site in Google Search Console and submit /sitemap.xml.
 - lib/affiliates.ts  : your real affiliate links.
 - lib/site.ts        : tagline and description.
 - lib/fetcher.ts     : NICHE and QUERIES at the top.
+Test edit
