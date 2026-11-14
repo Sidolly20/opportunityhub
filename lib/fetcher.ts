@@ -25,7 +25,7 @@ const QUERIES = [
 const MAX_ITEMS_PER_FEED = 8;
 const MAX_NEW_PER_RUN = 15; // keeps you inside the free Gemini limit
 const MAX_AGE_DAYS = 30;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const DELAY_BETWEEN_AI_CALLS_MS = 4500; // free tier is about 15 calls/min
 
 /* ------------------------------------------------------------------ */
@@ -180,7 +180,8 @@ SOURCE TEXT: ${item.snippet || "(no extra text)"}`;
 
 async function structure(
   model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>,
-  item: RawItem
+  item: RawItem,
+  errors: string[]
 ): Promise<Opportunity | null> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -215,6 +216,14 @@ async function structure(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[fetcher] Gemini error (try ${attempt}): ${msg}`);
+
+      // Remember a few distinct Gemini errors so they show up in the run summary.
+      const short = msg.slice(0, 300);
+      if (errors.length < 3 && !errors.includes(short)) errors.push(short);
+
+      // A missing or retired model will never work on a retry, so stop early.
+      if (/404|not found|no longer available/i.test(msg)) return null;
+
       if (/429|quota|rate/i.test(msg)) await sleep(20_000);
       else await sleep(1500);
     }
@@ -265,7 +274,7 @@ export async function runIngestion(): Promise<IngestReport> {
 
   const toSave: Opportunity[] = [];
   for (const item of fresh) {
-    const result = await structure(model, item);
+    const result = await structure(model, item, report.errors);
     if (result) toSave.push(result);
     else report.skipped++;
     await sleep(DELAY_BETWEEN_AI_CALLS_MS);
