@@ -10,8 +10,7 @@ import { getActive } from "@/lib/data";
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  verification: {
-  google: "ubILvCdiyRNkx7JySH30ud7IQtSTNsd1LVZCb4QxhFc",
+  <meta name="google-site-verification" content="ubILvCdiyRNkx7JySH30ud7IQtSTNsd1LVZCb4QxhFc" />
 },
   metadataBase: new URL(SITE.url),
   title: { default: `${SITE.name} | ${SITE.tagline}`, template: `%s | ${SITE.name}` },
