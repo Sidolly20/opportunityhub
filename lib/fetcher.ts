@@ -20,6 +20,11 @@ const QUERIES = [
   "scholarship Africans 2027 deadline",
   "grant funding African startups 2027",
   "remote work Africa hiring tech",
+  "remote software developer jobs open to Nigeria 2027",
+  "remote data analyst job Africa hiring now",
+  "free coding bootcamp Africa 2027",
+  "free tech training Africans scholarship 2027",
+  "free online tech course Africa certificate 2027",
 ];
 
 const MAX_ITEMS_PER_FEED = 8;
