@@ -10,7 +10,7 @@
     "ingest": "tsx scripts/ingest.ts"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.0",
+    "@google/genai": "^3.3.0",
     "@supabase/supabase-js": "^2.45.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
