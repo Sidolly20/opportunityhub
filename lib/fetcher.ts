@@ -1,5 +1,5 @@
 import Parser from "rss-parser";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import slugify from "slugify";
 import { createHash } from "crypto";
 import { AiItemSchema, CATEGORIES, type Opportunity } from "./types";
@@ -23,10 +23,10 @@ const QUERIES = [
 ];
 
 const MAX_ITEMS_PER_FEED = 8;
-const MAX_NEW_PER_RUN = 15; // keeps you inside the free Gemini limit
+const MAX_NEW_PER_RUN = 12; // safe batch size for free tier
 const MAX_AGE_DAYS = 30;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-const DELAY_BETWEEN_AI_CALLS_MS = 4500; // free tier is about 15 calls/min
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+const DELAY_BETWEEN_AI_CALLS_MS = 4500; // keeps you comfortably under per-minute limits
 
 /* ------------------------------------------------------------------ */
 /* 2. SMALL HELPERS                                                    */
@@ -179,19 +179,27 @@ SOURCE TEXT: ${item.snippet || "(no extra text)"}`;
 }
 
 async function structure(
-  model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>,
+  aiClient: GoogleGenAI,
   item: RawItem,
   errors: string[]
 ): Promise<Opportunity | null> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const res = await model.generateContent(buildPrompt(item));
-      const text = res.response.text();
+      const res = await aiClient.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: buildPrompt(item),
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+
+      const text = res.text ?? "";
       const parsed = AiItemSchema.safeParse(JSON.parse(text));
       if (!parsed.success) {
         console.warn(`[fetcher] Bad AI shape (try ${attempt}):`, item.title);
         continue;
       }
+
       const ai = parsed.data;
       if (!ai.isRelevant) return null;
 
@@ -217,76 +225,54 @@ async function structure(
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[fetcher] Gemini error (try ${attempt}): ${msg}`);
 
-      // Remember a few distinct Gemini errors so they show up in the run summary.
       const short = msg.slice(0, 300);
       if (errors.length < 3 && !errors.includes(short)) errors.push(short);
 
-      // A missing or retired model will never work on a retry, so stop early.
-      if (/404|not found|no longer available/i.test(msg)) return null;
-
-      if (/429|quota|rate/i.test(msg)) await sleep(20_000);
-      else await sleep(1500);
+      // Stop retrying immediately if the model name or API key is invalid
+      if (msg.includes("404") || msg.includes("400") || msg.includes("403")) {
+        break;
+      }
+      await sleep(2000);
     }
   }
   return null;
 }
 
 /* ------------------------------------------------------------------ */
-/* 6. MAIN FUNCTION - called by the cron route                         */
+/* 6. MAIN RUNNER - fetches, structures, and saves new items           */
 /* ------------------------------------------------------------------ */
 
-export interface IngestReport {
-  feedItems: number;
-  afterDedupe: number;
-  saved: number;
-  skipped: number;
-  errors: string[];
-}
-
-export async function runIngestion(): Promise<IngestReport> {
-  const report: IngestReport = { feedItems: 0, afterDedupe: 0, saved: 0, skipped: 0, errors: [] };
-
+export async function runFetcher() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    report.errors.push("GEMINI_API_KEY is missing");
-    return report;
+    throw new Error("Missing GEMINI_API_KEY in .env.local");
   }
 
-  const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
-    model: GEMINI_MODEL,
-    generationConfig: { responseMimeType: "application/json", temperature: 0.3 },
-  });
-
-  let raw: RawItem[] = [];
-  try {
-    raw = await readFeeds();
-  } catch (e) {
-    report.errors.push(`readFeeds: ${(e as Error).message}`);
-    return report;
-  }
-  report.feedItems = raw.length;
-
+  const aiClient = new GoogleGenAI({ apiKey });
   const existing = await getAll();
-  const fresh = dedupe(raw, existing)
-    .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt))
-    .slice(0, MAX_NEW_PER_RUN);
-  report.afterDedupe = fresh.length;
+  const raw = await readFeeds();
+  const fresh = dedupe(raw, existing).slice(0, MAX_NEW_PER_RUN);
 
-  const toSave: Opportunity[] = [];
-  for (const item of fresh) {
-    const result = await structure(model, item, report.errors);
-    if (result) toSave.push(result);
-    else report.skipped++;
-    await sleep(DELAY_BETWEEN_AI_CALLS_MS);
+  const created: Opportunity[] = [];
+  const errors: string[] = [];
+
+  for (let i = 0; i < fresh.length; i++) {
+    if (i > 0) await sleep(DELAY_BETWEEN_AI_CALLS_MS);
+    const structured = await structure(aiClient, fresh[i], errors);
+    if (structured) {
+      created.push(structured);
+    }
   }
 
-  try {
-    await saveMany(toSave);
-    report.saved = toSave.length;
-  } catch (e) {
-    report.errors.push(`saveMany: ${(e as Error).message}`);
+  if (created.length > 0) {
+    await saveMany(created);
   }
 
-  console.log("[fetcher] Done:", report);
-  return report;
+  return {
+    scanned: raw.length,
+    candidates: fresh.length,
+    added: created.length,
+    model: GEMINI_MODEL,
+    errors,
+  };
 }
