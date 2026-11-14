@@ -4,6 +4,7 @@ import slugify from "slugify";
 import { createHash } from "crypto";
 import { AiItemSchema, CATEGORIES, type Opportunity } from "./types";
 import { getAll, saveMany } from "./store";
+import { fetchRemotiveJobs } from "./sources/remotive";
 
 /* ------------------------------------------------------------------ */
 /* 1. SETTINGS - change these to change your niche                     */
@@ -269,14 +270,24 @@ export async function runFetcher() {
     }
   }
 
-  if (created.length > 0) {
-    await saveMany(created);
+  // Real job listings from a job board (independent of the news step).
+  let jobs: Opportunity[] = [];
+  try {
+    jobs = await fetchRemotiveJobs(new Set(existing.map((o) => o.id)));
+  } catch (err) {
+    errors.push(`job source: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300));
+  }
+
+  const toSave = [...created, ...jobs];
+  if (toSave.length > 0) {
+    await saveMany(toSave);
   }
 
   return {
     scanned: raw.length,
     candidates: fresh.length,
-    added: created.length,
+    jobs: jobs.length,
+    added: toSave.length,
     model: GEMINI_MODEL,
     errors,
   };
