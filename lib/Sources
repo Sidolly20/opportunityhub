@@ -33,10 +33,29 @@ function isOpenToAfrica(location: string) {
 
 // Piecework, labelling and pay-to-start roles. These are skipped even if they pay.
 const REJECT_WORDS = [
-  "annotat", "data label", "labelling", "labeling", "ai trainer", "ai training", "rlhf",
-  "micro task", "microtask", "micro-task", "per task", "per hour task", "tasks per",
-  "onboarding fee", "registration fee", "training fee", "pay to", "deposit", "investment",
-  "commission only", "mlm", "earn from home", "easy money",
+  "annotat",
+  "data label",
+  "labelling",
+  "labeling",
+  "ai trainer",
+  "ai training",
+  "rlhf",
+  "micro task",
+  "microtask",
+  "micro-task",
+  "per task",
+  "per hour task",
+  "tasks per",
+  "onboarding fee",
+  "registration fee",
+  "training fee",
+  "pay to",
+  "deposit",
+  "investment",
+  "commission only",
+  "mlm",
+  "earn from home",
+  "easy money",
 ];
 
 function looksLikeScam(text: string) {
@@ -96,7 +115,7 @@ export async function fetchRemotiveJobs(known: Set<string>): Promise<Opportunity
     const summary = clip(
       `${job.company_name} is hiring for ${job.title}. The listing is open to applicants in ${location}. ` +
         `Role type: ${roleType}. Read the full description and apply on the employer's listing.`,
-      400
+      400,
     );
 
     out.push({
@@ -114,7 +133,9 @@ export async function fetchRemotiveJobs(known: Set<string>): Promise<Opportunity
       ],
       sourceName: "Remotive",
       sourceUrl: job.url,
-      publishedAt: job.publication_date ? new Date(job.publication_date).toISOString() : new Date().toISOString(),
+      publishedAt: job.publication_date
+        ? new Date(job.publication_date).toISOString()
+        : new Date().toISOString(),
       createdAt: new Date().toISOString(),
     });
   }
