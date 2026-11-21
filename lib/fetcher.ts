@@ -165,39 +165,6 @@ function dedupe(raw: RawItem[], existing: Opportunity[]): RawItem[] {
   }
   return kept;
 }
-
-/* ------------------------------------------------------------------ */
-/* 5. STEP C - read the real pages (article -> official page)          */
-/* ------------------------------------------------------------------ */
-
-const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-const SKIP_HOSTS =
-  /(facebook|twitter|x\.com|instagram|linkedin|youtube|whatsapp|t\.me|telegram|pinterest|tiktok|google\.|doubleclick|wp\.com|wordpress|gravatar)/i;
-
-interface Page {
-  url: string;
-  html: string;
-  text: string;
-}
-
-function htmlToText(html: string) {
-  return html
-    .replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#39;|&rsquo;|&apos;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s*\n+/g, "\n")
-    .trim()
-    .slice(0, MAX_PAGE_CHARS);
-}
-
 async function fetchPage(url: string): Promise<Page | null> {
   try {
     if (!/^https?:\/\//i.test(url)) return null;
@@ -377,7 +344,37 @@ OFFICIAL PAGE ADDRESS: ${page.url}
 OFFICIAL PAGE TEXT:
 ${page.text}`;
 }
+/* ------------------------------------------------------------------ */
+/* 5. STEP C - read the real pages (article -> official page)          */
+/* ------------------------------------------------------------------ */
 
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const SKIP_HOSTS =
+  /(facebook|twitter|x\.com|instagram|linkedin|youtube|whatsapp|t\.me|telegram|pinterest|tiktok|google\.|doubleclick|wp\.com|wordpress|gravatar)/i;
+
+interface Page {
+  url: string;
+  html: string;
+  text: string;
+}
+
+function htmlToText(html: string) {
+  return html
+    .replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;|&rsquo;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n")
+    .trim()
+    .slice(0, MAX_PAGE_CHARS);
+}
 interface Stats {
   unresolved: number;
   unreadable: number;
@@ -518,4 +515,35 @@ export async function runFetcher() {
     if (built) refreshed.push(built);
   }
 
-  // C) real job listings from a job board (they get upgraded by step B on later da
+  // C) real job listings from a job board (they get upgraded by step B on later days)
+  let jobs: Opportunity[] = [];
+  try {
+    jobs = await fetchRemotiveJobs(new Set(existing.map((o) => o.id)));
+  } catch (err) {
+    errors.push(`job source: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300));
+  }
+
+  const toSave = [...created, ...refreshed, ...jobs];
+  if (toSave.length > 0) {
+    await saveMany(toSave);
+  }
+
+  const tried = fresh.length + refreshList.length;
+  const warning =
+    tried >= 4 && created.length + refreshed.length === 0
+      ? `Read 0 of ${tried} pages successfully (could not open: ${stats.unresolved + stats.unreadable + stats.noOfficial}, too thin: ${stats.lowQuality}). The page reader may need attention.`
+      : "";
+
+  return {
+    scanned: raw.length,
+    candidates: fresh.length,
+    newPublished: created.length,
+    refreshed: refreshed.length,
+    jobs: jobs.length,
+    added: created.length + jobs.length,
+    skipped: stats,
+    model: GEMINI_MODEL,
+    errors,
+    warning,
+  };
+}
