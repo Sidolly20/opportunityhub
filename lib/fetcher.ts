@@ -170,7 +170,8 @@ function dedupe(raw: RawItem[], existing: Opportunity[]): RawItem[] {
 /* 5. STEP C - read the real pages (article -> official page)          */
 /* ------------------------------------------------------------------ */
 
-const BROWSER_UA = "Mozilla/5.0 (compatible; OpportunityHubBot/1.0)";
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const SKIP_HOSTS =
   /(facebook|twitter|x\.com|instagram|linkedin|youtube|whatsapp|t\.me|telegram|pinterest|tiktok|google\.|doubleclick|wp\.com|wordpress|gravatar)/i;
 
@@ -202,7 +203,11 @@ async function fetchPage(url: string): Promise<Page | null> {
     if (!/^https?:\/\//i.test(url)) return null;
     const res = await fetch(url, {
       redirect: "follow",
-      headers: { "User-Agent": BROWSER_UA, Accept: "text/html,application/xhtml+xml" },
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return null;
@@ -402,7 +407,7 @@ async function buildOpportunity(
       return null;
     }
     const article = await fetchPage(articleUrl);
-    if (!article || article.text.length < MIN_PAGE_CHARS) {
+    if (!article) {
       stats.unreadable++;
       return null;
     }
@@ -513,35 +518,4 @@ export async function runFetcher() {
     if (built) refreshed.push(built);
   }
 
-  // C) real job listings from a job board (they get upgraded by step B on later days)
-  let jobs: Opportunity[] = [];
-  try {
-    jobs = await fetchRemotiveJobs(new Set(existing.map((o) => o.id)));
-  } catch (err) {
-    errors.push(`job source: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300));
-  }
-
-  const toSave = [...created, ...refreshed, ...jobs];
-  if (toSave.length > 0) {
-    await saveMany(toSave);
-  }
-
-  const tried = fresh.length + refreshList.length;
-  const warning =
-    tried >= 4 && created.length + refreshed.length === 0
-      ? `Read 0 of ${tried} pages successfully (could not open: ${stats.unresolved + stats.unreadable + stats.noOfficial}, too thin: ${stats.lowQuality}). The page reader may need attention.`
-      : "";
-
-  return {
-    scanned: raw.length,
-    candidates: fresh.length,
-    newPublished: created.length,
-    refreshed: refreshed.length,
-    jobs: jobs.length,
-    added: created.length + jobs.length,
-    skipped: stats,
-    model: GEMINI_MODEL,
-    errors,
-    warning,
-  };
-}
+  // C) real job listings from a job board (they get upgraded by step B on later da
