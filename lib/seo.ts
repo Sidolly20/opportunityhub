@@ -1,5 +1,6 @@
 import { SITE } from "./site";
 import type { Opportunity } from "./types";
+import { statusOf } from "./dates";
 
 export const abs = (p: string) => `${SITE.url}${p.startsWith("/") ? p : `/${p}`}`;
 
@@ -23,7 +24,7 @@ export function articleLd(o: Opportunity) {
     headline: o.title.slice(0, 110),
     description: o.summary,
     datePublished: o.publishedAt,
-    dateModified: o.createdAt,
+    dateModified: o.checkedAt ?? o.createdAt,
     inLanguage: "en",
     mainEntityOfPage: abs(`/opportunity/${o.slug}`),
     isBasedOn: o.sourceUrl,
@@ -64,4 +65,21 @@ export function siteLd() {
       inLanguage: "en",
     },
   ];
+}
+
+/** Only listings that were really read from the official page and have the extra detail go to Google. */
+export function isIndexable(o: Opportunity) {
+  return !!o.checkedAt && !!o.whoItsFor && !!o.theCatch && statusOf(o) !== "closed";
+}
+
+export function faqLd(faqs: { q: string; a: string }[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map((f) => ({
+      "@type": "Question",
+      name: f.q,
+      acceptedAnswer: { "@type": "Answer", text: f.a },
+    })),
+  };
 }
