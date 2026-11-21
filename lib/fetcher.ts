@@ -7,6 +7,7 @@ import { AiItemSchema, CATEGORIES, type Opportunity } from "./types";
 import { statusOf } from "./dates";
 import { getAll, saveMany } from "./store";
 import { fetchRemotiveJobs } from "./sources/remotive";
+import { SEED_PAGES } from "./seeds";
 
 /* ------------------------------------------------------------------ */
 /* 1. SETTINGS - change these to change your niche                     */
@@ -42,6 +43,7 @@ const RECHECK_AFTER_DAYS = 14; // re-read the official page after this many days
 const MIN_QUALITY = 6; // Gemini scores the official page 0-10; below this = not published
 const MIN_PAGE_CHARS = 700; // official page must have at least this much readable text
 const MAX_PAGE_CHARS = 12000; // how much of the page we hand to Gemini
+const MAX_SEEDS_PER_RUN = 8; // official pages read from the seed list per run
 const ALLOW_NEWS = false; // news-only items are thin; keep off for quality
 
 /* ------------------------------------------------------------------ */
@@ -165,6 +167,51 @@ function dedupe(raw: RawItem[], existing: Opportunity[]): RawItem[] {
   }
   return kept;
 }
+
+/* ------------------------------------------------------------------ */
+/* 5. STEP C - read the real pages (article -> official page)          */
+/* ------------------------------------------------------------------ */
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const SKIP_HOSTS =
+  /(facebook|twitter|x\.com|instagram|linkedin|youtube|whatsapp|t\.me|telegram|pinterest|tiktok|google\.|doubleclick|wp\.com|wordpress|gravatar)/i;
+
+interface Page {
+  url: string;
+  html: string;
+  text: string;
+}
+
+function htmlToText(html: string) {
+  return html
+    .replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;|&rsquo;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n")
+    .trim()
+    .slice(0, MAX_PAGE_CHARS);
+}
+
+const fetchProblems: string[] = [];
+function noteProblem(why: string, url: string) {
+  let host = url;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    /* keep raw */
+  }
+  const line = `${why} ${host}`;
+  if (fetchProblems.length < 12 && !fetchProblems.includes(line)) fetchProblems.push(line);
+}
+
 async function fetchPage(url: string): Promise<Page | null> {
   try {
     if (!/^https?:\/\//i.test(url)) return null;
@@ -177,12 +224,19 @@ async function fetchPage(url: string): Promise<Page | null> {
       },
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      noteProblem(`HTTP ${res.status}`, url);
+      return null;
+    }
     const type = res.headers.get("content-type") || "";
-    if (!type.includes("html")) return null;
+    if (!type.includes("html")) {
+      noteProblem("not-html", url);
+      return null;
+    }
     const html = (await res.text()).slice(0, 1_500_000);
     return { url: res.url || url, html, text: htmlToText(html) };
-  } catch {
+  } catch (err) {
+    noteProblem(`error(${err instanceof Error ? err.message.slice(0, 40) : "unknown"})`, url);
     return null;
   }
 }
@@ -344,37 +398,7 @@ OFFICIAL PAGE ADDRESS: ${page.url}
 OFFICIAL PAGE TEXT:
 ${page.text}`;
 }
-/* ------------------------------------------------------------------ */
-/* 5. STEP C - read the real pages (article -> official page)          */
-/* ------------------------------------------------------------------ */
 
-const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-const SKIP_HOSTS =
-  /(facebook|twitter|x\.com|instagram|linkedin|youtube|whatsapp|t\.me|telegram|pinterest|tiktok|google\.|doubleclick|wp\.com|wordpress|gravatar)/i;
-
-interface Page {
-  url: string;
-  html: string;
-  text: string;
-}
-
-function htmlToText(html: string) {
-  return html
-    .replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#39;|&rsquo;|&apos;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s*\n+/g, "\n")
-    .trim()
-    .slice(0, MAX_PAGE_CHARS);
-}
 interface Stats {
   unresolved: number;
   unreadable: number;
@@ -408,8 +432,8 @@ async function buildOpportunity(
       stats.unreadable++;
       return null;
     }
-    if (raw.sourceName === "Remotive") {
-      official = article; // a job board page is already the real listing
+    if (raw.sourceName === "Remotive" || raw.sourceName === "Official") {
+      official = article; // a job board page or a seed page is already the real listing
     } else {
       const links = extractLinks(article.html, article.url);
       const find = await askJson(aiClient, buildFindPrompt(raw, article.text, links), FindSchema, errors);
@@ -495,6 +519,25 @@ export async function runFetcher() {
     }
   }
 
+  // A2) official pages from the seed list (new ones only; old ones are re-checked in step B)
+  const knownLinks = new Set(existing.flatMap((o) => [o.sourceUrl, o.officialUrl].filter(Boolean) as string[]));
+  const seedsToTry = SEED_PAGES.filter((sd) => !knownLinks.has(sd.url)).slice(0, MAX_SEEDS_PER_RUN);
+  for (const sd of seedsToTry) {
+    await sleep(DELAY_BETWEEN_AI_CALLS_MS);
+    const asRaw: RawItem = {
+      title: sd.label,
+      link: sd.url,
+      sourceName: "Official",
+      snippet: "",
+      publishedAt: new Date().toISOString(),
+    };
+    const built = await buildOpportunity(aiClient, asRaw, undefined, errors, stats);
+    if (built && !(built.officialUrl && knownOfficial.has(built.officialUrl))) {
+      if (built.officialUrl) knownOfficial.add(built.officialUrl);
+      created.push(built);
+    }
+  }
+
   // B) upgrade old thin listings and re-check old ones (never-checked first, then oldest)
   const refreshList = existing
     .filter(needsCheck)
@@ -528,7 +571,7 @@ export async function runFetcher() {
     await saveMany(toSave);
   }
 
-  const tried = fresh.length + refreshList.length;
+  const tried = fresh.length + seedsToTry.length + refreshList.length;
   const warning =
     tried >= 4 && created.length + refreshed.length === 0
       ? `Read 0 of ${tried} pages successfully (could not open: ${stats.unresolved + stats.unreadable + stats.noOfficial}, too thin: ${stats.lowQuality}). The page reader may need attention.`
@@ -537,11 +580,13 @@ export async function runFetcher() {
   return {
     scanned: raw.length,
     candidates: fresh.length,
+    seedsTried: seedsToTry.length,
     newPublished: created.length,
     refreshed: refreshed.length,
     jobs: jobs.length,
     added: created.length + jobs.length,
     skipped: stats,
+    fetchProblems,
     model: GEMINI_MODEL,
     errors,
     warning,
