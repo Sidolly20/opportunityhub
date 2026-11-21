@@ -8,7 +8,7 @@ import SponsorSlot from "@/components/SponsorSlot";
 import OpportunityCard from "@/components/OpportunityCard";
 import { getAll, getBySlug } from "@/lib/store";
 import { SITE } from "@/lib/site";
-import { abs, articleLd, breadcrumbLd } from "@/lib/seo";
+import { abs, articleLd, breadcrumbLd, faqLd, isIndexable } from "@/lib/seo";
 import { categorySlug } from "@/lib/categories";
 import { AFFILIATES } from "@/lib/affiliates";
 import { countdownText, formatDate, statusOf } from "@/lib/dates";
@@ -33,7 +33,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: o.title,
     description: desc,
     alternates: { canonical: url },
-    robots: closed ? { index: false, follow: true } : { index: true, follow: true },
+    robots: closed || !isIndexable(o) ? { index: false, follow: true } : { index: true, follow: true },
     openGraph: {
       type: "article",
       title: o.title,
@@ -41,7 +41,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       url: abs(url),
       siteName: SITE.name,
       publishedTime: o.publishedAt,
-      modifiedTime: o.createdAt,
+      modifiedTime: o.checkedAt ?? o.createdAt,
       section: o.category,
     },
     twitter: { card: "summary_large_image", title: o.title, description: desc },
@@ -58,7 +58,7 @@ export default async function OpportunityPage({ params }: Props) {
   const all = await getAll();
   const related = all.filter((x) => x.category === o.category && x.id !== o.id && statusOf(x) !== "closed").slice(0, 3);
 
-  const steps = [
+  const genericSteps = [
     "Open the official page using the button below and read the full rules.",
     "Check the eligibility list above against your own situation, one line at a time.",
     "Prepare what is usually needed: an updated CV, a short statement, and any links to your work.",
@@ -67,10 +67,13 @@ export default async function OpportunityPage({ params }: Props) {
       : "Submit as early as you can, because rolling roles can close without warning.",
     "Save a copy of what you sent, and never pay anyone to be considered.",
   ];
+  const steps = o.applySteps && o.applySteps.length > 0 ? o.applySteps : genericSteps;
+  const applyUrl = o.officialUrl ?? o.sourceUrl;
 
   return (
     <>
       <JsonLd data={articleLd(o)} />
+      {o.faqs && o.faqs.length > 0 && <JsonLd data={faqLd(o.faqs)} />}
       <JsonLd
         data={breadcrumbLd([
           { name: "Home", path: "/" },
@@ -106,7 +109,7 @@ export default async function OpportunityPage({ params }: Props) {
                 <div><dt className="text-slate-400">Source</dt><dd className="mt-1 font-semibold text-ink">{o.sourceName}</dd></div>
               </dl>
               <p className="mt-3 text-xs text-slate-500">
-                Published {formatDate(o.publishedAt)} · Added {formatDate(o.createdAt)}
+                Published {formatDate(o.publishedAt)} · {o.checkedAt ? `Checked against the official page on ${formatDate(o.checkedAt)}` : `Added ${formatDate(o.createdAt)}`}
               </p>
             </header>
 
@@ -121,6 +124,30 @@ export default async function OpportunityPage({ params }: Props) {
                 ))}
               </ul>
             </section>
+
+            {(o.whoItsFor || o.whoShouldSkip || o.theCatch) && (
+              <section className="mt-10 space-y-4" aria-labelledby="fit">
+                <h2 id="fit" className="text-2xl font-bold text-ink">Is this right for you?</h2>
+                {o.whoItsFor && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                    <p className="text-sm font-semibold text-emerald-800">Who it suits</p>
+                    <p className="mt-1 text-slate-700">{o.whoItsFor}</p>
+                  </div>
+                )}
+                {o.whoShouldSkip && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-sm font-semibold text-slate-600">Who should skip it</p>
+                    <p className="mt-1 text-slate-700">{o.whoShouldSkip}</p>
+                  </div>
+                )}
+                {o.theCatch && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                    <p className="text-sm font-semibold text-amber-800">The catch</p>
+                    <p className="mt-1 text-slate-700">{o.theCatch}</p>
+                  </div>
+                )}
+              </section>
+            )}
 
             <section className="mt-10" aria-labelledby="elig">
               <h2 id="elig" className="text-2xl font-bold text-ink">Eligibility checklist</h2>
@@ -149,7 +176,7 @@ export default async function OpportunityPage({ params }: Props) {
                 ))}
               </ol>
               <a
-                href={o.sourceUrl}
+                href={applyUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-8 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-bold text-white shadow hover:bg-emerald-700"
@@ -160,6 +187,19 @@ export default async function OpportunityPage({ params }: Props) {
                 Source: {o.sourceName}. We summarise in our own words and link to the original. Always confirm details on the official page.
               </p>
             </section>
+            {o.faqs && o.faqs.length > 0 && (
+              <section className="mt-10" aria-labelledby="faq">
+                <h2 id="faq" className="text-2xl font-bold text-ink">Questions people ask</h2>
+                <dl className="mt-4 space-y-4">
+                  {o.faqs.map((f, i) => (
+                    <div key={i}>
+                      <dt className="font-semibold text-ink">{f.q}</dt>
+                      <dd className="mt-1 text-slate-700">{f.a}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            )}
           </article>
 
           {/* SIDEBAR */}
